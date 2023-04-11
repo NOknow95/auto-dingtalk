@@ -1,0 +1,49 @@
+[
+  {
+    "name": "dingtalkAccount",
+    "type": "text",
+    "label": "钉钉账号"
+  },
+  {
+    "name": "dingtalkPwd",
+    "type": "password",
+    "label": "钉钉密码"
+  },
+  {
+    "name": "companyName",
+    "label": "公司名[非必填]",
+    "placeholder": "如果你的钉钉加入了多个公司，请填写你打卡的公司名"
+  },
+  {
+    "name": "notifyMsg",
+    "type": "checkbox",
+    "label": "消息通知",
+    "value": "true"
+  },
+  {
+    "name": "pushplusToken",
+    "type": "text",
+    "label": "Pupshplus Token"
+  },
+  {
+    "name": "postCapture",
+    "type": "checkbox",
+    "label": "打卡成功后截图",
+    "value": "true"
+  },
+  {
+    "name": "uploadImgToken",
+    "type": "text",
+    "label": "映画图床token"
+  },
+  {
+    "name": "exitAppPost",
+    "type": "checkbox",
+    "label": "打卡成功后退出钉钉进程"
+  },
+  {
+    "name": "lockScreenPost",
+    "type": "checkbox",
+    "label": "打卡成功后锁屏"
+  }
+]
