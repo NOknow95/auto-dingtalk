@@ -1,6 +1,7 @@
 importClass(android.content.Context);
 importClass(android.provider.Settings);
 
+const scriptStartTime = new Date().getTime();
 const {env} = hamibot;
 log('env=', env);
 const dingTalkAppName = '钉钉';
@@ -422,7 +423,8 @@ function exitScript(code, msg) {
         windowLogAndSleep1Second(msg);
     }
     imgUrl = screenshotsAndUpload(title);
-    notifyMsg(title, content, imgUrl);
+    let scriptCostSec = (new Date().getTime() - scriptStartTime) / 1000.0;
+    notifyMsg(title, content + ', time cost:' + scriptCostSec + ' seconds', imgUrl);
     if (code !== 0) {
         postExit();
     }
