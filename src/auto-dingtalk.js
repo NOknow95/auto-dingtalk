@@ -1,12 +1,16 @@
 importClass(android.content.Context);
 importClass(android.provider.Settings);
 
+log('===start script===');
 const scriptStartTime = new Date().getTime();
 const {env} = hamibot;
-log('env=', env);
+// log('env=', env);
 const dingTalkAppName = '钉钉';
+let errCode = -100;
 let testingCaptureScreenEnabled = true;
 let testingNotifyMsgEnabled = true;
+let testingExitAppPostEnabled = true;
+let testingLockScreenPostEnabled = true;
 let dingConf = storages.create("DingTalkConfig");
 let swipeConfName = device.getAndroidId() + "_SWIPE_TIME";
 let displayMetrics = context.getResources().getDisplayMetrics();
@@ -28,24 +32,97 @@ threads.start(function () {
 
 (function () {
     unlockScreenIfNeeded();
-    testOtherCode();
-    checkEnv();
+    //testOtherCode();
+    checkEnvAndConfig();
+    restartApp();
+    loginToAppIfNeed();
+    gotoClockInPage()
     checkInOrOut();
 })()
+log('===end script===');
 
 function testOtherCode() {
     // console.show();
-    // testingCaptureScreenEnabled = false;
-    // testingNotifyMsgEnabled = false;
-    // windowLogAndSleep1Second('begin test');
-    // try {
-    //     let i = undefined;
-    //     let u = 1 / i;
-    //     windowLogAndSleep1Second('u=' + u);
-    // } catch (error){
-    //     windowLogAndSleep1Second("error:" + error);
-    // }
-    // exitScript(0);
+    testingCaptureScreenEnabled = false;
+    testingNotifyMsgEnabled = false;
+    testingExitAppPostEnabled = false;
+    testingLockScreenPostEnabled = false;
+    errCode = 0;
+    windowLogAndSleep('begin test');
+    //----------------------------------
+    // restartApp();
+    // checkIfAccountCorrect('王建文ᯤ⁶ᴳ');
+    loginToAppIfNeed('15980269867', 'ddWjw19951', 'jwtest');
+    //----------------------------------
+    windowLogAndSleep('end test');
+    exitScript(0);
+}
+
+function restartApp() {
+    killApp(dingTalkAppName);
+    openApp(dingTalkAppName);
+}
+
+function loginToAppIfNeed(dingtalkAccount, dingtalkPwd, userInfoName) {
+    let page = currentPage();
+    const times = 30;
+    if (tryCallUntil(times, () => (page = currentPage()) === 'login' || page === 'home', (i) => windowLog('waiting for the login/home page...' + i))) {
+        if (page === 'login') {
+            //---------------------
+            windowLogAndSleep('current page is:login, ready to login');
+            loginToApp(dingtalkAccount, dingtalkPwd);
+            //---------------------
+        } else {
+            windowLogAndSleep('current page is:home, no need to login', 2000);
+            if (checkIfAccountCorrect(userInfoName)) {
+                if (!tryCallUntil(3, () => currentPage() === 'home', () => back())) {
+                    exitScript(errCode, 'cannot back to app-home after checking account');
+                }
+            } else {
+                if (!tryCallUntil(5, () => textExists('我的信息'), () => textClick('设置'))) {
+                    exitScript(errCode, 'cannot goto app-setting page');
+                }
+                windowLogAndSleep('on the app-setting page');
+                if (!tryCallUntil(5, () => textExists('确认'), () => textClick('退出登录'))) {
+                    exitScript(errCode, 'failed to click [退出登录]');
+                }
+                if (tryCallUntil(20, () => currentPage() === 'login', () => {
+                    if (textExists('确认')) {
+                        textClick('确认');
+                    }
+                })) {
+                    //---------------------
+                    windowLogAndSleep('success to logout. current page is:login, ready to login');
+                    loginToApp(dingtalkAccount, dingtalkPwd);
+                    //---------------------
+                } else {
+                    exitScript(errCode, 'failed to click [确认] to logout');
+                }
+            }
+        }
+    }
+}
+
+function checkIfAccountCorrect(userInfoName) {
+    if (isEmptyString(userInfoName) && isEmptyString(env.userInfoName)) {
+        windowLogAndSleep('no need to check if account correct');
+        return true;
+    }
+    if (currentPage() !== 'home') {
+        exitScript(errCode, 'make sure current page is:home');
+    }
+    if (tryCallUntil(5, () => textExists('设置') && textExists('客服与帮助'), i => idClick('my_avatar'))) {
+        windowLogAndSleep('found [设置] and [客服与帮助] after click avatar in home page');
+        if (tryCallUntil(3, () => textExists(userInfoName))) {
+            windowLogAndSleep('the account is correct');
+            return true;
+        } else {
+            windowLogAndSleep('the account is not correct');
+        }
+    } else {
+        exitScript(errCode, 'cannot found text[设置] after click avatar in home page');
+    }
+    return false;
 }
 
 function setFloatText(txt) {
@@ -54,36 +131,25 @@ function setFloatText(txt) {
     });
 }
 
-function checkEnv() {
+function checkEnvAndConfig() {
     auto.waitFor();
-    windowLogAndSleep1Second('accessibility service on.  isOnLockScreen:' + isOnLockScreen());
+    windowLogAndSleep('accessibility service on.  isOnLockScreen:' + isOnLockScreen());
     const packageName = app.getPackageName(dingTalkAppName);
     log('get the packageName:', dingTalkAppName, '-->', packageName);
     if (packageName == null) {
-        exitScript(-100, 'cannot found the app:' + dingTalkAppName);
+        exitScript(errCode, 'cannot found the app:' + dingTalkAppName);
         return;
     }
-    windowLogAndSleep1Second("found the app:" + dingTalkAppName);
+    windowLogAndSleep("found the app:" + dingTalkAppName);
     notifyMsg('script started', 'script started on [' + getFormatDateTime(0) + ']');
 }
 
-function checkInOrOut() {
-    killApp(dingTalkAppName);
-    openApp(dingTalkAppName);
-    let page = waitForPageLoaded(30);
-    windowLogAndSleep1Second('current page is :' + page);
-    goToCheckInPageFrom(page);
-    sleep1Second();
-    if (!isOnClockInPage(true)) {
-        exitScript(-100, 'still not on clock-in page.');
-        return false;
+function checkInOrOut(dingtalkAccount, dingtalkPwd, companyName) {
+    function isNeedCheckIn(dingtalkAccount, dingtalkPwd, companyName) {
+        return true;
     }
-    doCheckInOrOutWithConfig();
-    return true;
-}
 
-function doCheckInOrOutWithConfig() {
-    if (!isNeedCheckIn()) {
+    if (!isNeedCheckIn(dingtalkAccount, dingtalkPwd, companyName)) {
         return;
     }
     let checkInTip = '上班打卡';
@@ -96,20 +162,20 @@ function doCheckInOrOutWithConfig() {
         sleep1Second();
         if (textClick(checkInTip)) {
             let limit = 20;
-            if (tryCallUntil(limit, () => textExists(checkInSuccessTip), () => windowLogAndSleep1Second('waiting for [' + checkInSuccessTip + ']-' + (limit--)))) {
+            if (tryCallUntil(limit, () => textExists(checkInSuccessTip), () => windowLogAndSleep('waiting for [' + checkInSuccessTip + ']-' + (limit--)))) {
                 exitScript(1);
             } else {
                 exitScript(-1, 'timeout to check in');
             }
         } else {
-            exitScript(-100, 'failed to click [' + checkInTip + ']');
+            exitScript(errCode, 'failed to click [' + checkInTip + ']');
         }
     } else if (textExists(checkOutTip)) {
         notifyMsg('ready', 'ready to check out[' + getFormatDateTime(0) + ']');
         sleep1Second();
         if (textClick(checkOutTip)) {
             let limit = 20;
-            if (tryCallUntil(limit, () => textExists(checkOutSuccessTip) || textExists(leaveEarlyTip), () => windowLogAndSleep1Second('waiting for [下班打卡成功]-' + (limit--)))) {
+            if (tryCallUntil(limit, () => textExists(checkOutSuccessTip) || textExists(leaveEarlyTip), () => windowLogAndSleep('waiting for [下班打卡成功]-' + (limit--)))) {
                 if (textExists(checkOutSuccessTip)) {
                     exitScript(2);
                 } else if (textExists(leaveEarlyTip)) {
@@ -119,15 +185,15 @@ function doCheckInOrOutWithConfig() {
                 exitScript(-2, 'timeout to check out');
             }
         } else {
-            exitScript(-100, 'failed to click [' + checkOutTip + ']');
+            exitScript(errCode, 'failed to click [' + checkOutTip + ']');
         }
     } else {
-        exitScript(-100, 'not exists [' + checkInTip + '] or [' + checkOutTip + ']');
+        exitScript(errCode, 'not exists [' + checkInTip + '] or [' + checkOutTip + ']');
     }
 }
 
 function screenshotsAndUpload(fileNameSuffix) {
-    log('testingCaptureScreenEnabled ? :' + testingCaptureScreenEnabled);
+    log('testingCaptureScreenEnabled :' + testingCaptureScreenEnabled);
     if (!testingCaptureScreenEnabled) {
         return null;
     }
@@ -147,7 +213,7 @@ function screenshotsAndUpload(fileNameSuffix) {
     start = new Date().getTime();
     captureScreen(saveScreenshotFilePath);
     timeMs = new Date().getTime() - start;
-    if (tryCallUntil(3, () => files.exists(saveScreenshotFilePath), emptyFunction)) {
+    if (tryCallUntil(3, () => files.exists(saveScreenshotFilePath))) {
         log('success to screenshots:' + saveScreenshotFilePath + ', time cost:' + timeMs + 'ms');
         start = new Date().getTime();
         let imgUrl = uploadImageAndGetLink(saveScreenshotFilePath);
@@ -160,112 +226,102 @@ function screenshotsAndUpload(fileNameSuffix) {
     }
 }
 
-function isNeedCheckIn() {
-    return true;
-}
-
-function goToCheckInPageFrom(currentPage) {
-    switch (currentPage) {
-        case 'home':
-            if (!tryCallUntil(10, () => textExists('打卡'), () => {
-                id('home_app_item').findOne(100).click();
-            })) {
-                exitScript(-100, 'cannot find the text[打卡] in app-home page');
-                return;
-            }
-            windowLogAndSleep1Second('clicking [打卡] in app-home');
-            if (!textClick("打卡")) {
-                exitScript(-100, 'failed to click [打卡]');
-                return;
-            }
-            if (tryCallUntil(5, () => textExists('选择打卡企业'), emptyFunction)) {
-                windowLogAndSleep1Second('multiple companies found');
-                if (isEmptyString(env.companyName)) {
-                    exitScript(-100, "not config the 'companyName'");
-                } else {
-                    windowLogAndSleep1Second('clicking the company:[' + env.companyName + ']');
-                    textClick(env.companyName);
-                }
-            }
-            let limit = 20;
-            if (!tryCallUntil(limit, () => isOnClockInPage(true), () => windowLog('waiting for clock-in page:' + limit--))) {
-                exitScript(-100, 'timeout to goto clock-in page!!!');
-                return;
-            }
-            windowLogAndSleep1Second('current in the clock-in page !');
-            break;
-        case 'login':
-            loginToApp();
-            goToCheckInPageFrom('home');
-            break;
-        case 'clock-in':
-        default:
-            break;
+function gotoClockInPage() {
+    let times = 30;
+    if (!tryCallUntil(times, () => currentPage() === 'home', i => windowLog('waiting for app-home page...' + i))) {
+        exitScript(errCode, 'make sure current page is on app-home');
+    }
+    times = 10;
+    if (!tryCallUntil(times, () => textExists('打卡'), i => windowLog('waiting for text[打卡] in app-home page...' + i))) {
+        exitScript(errCode, 'cannot find the text[打卡] in app-home page');
+    }
+    windowLogAndSleep('clicking [打卡] in app-home');
+    if (!textClick("打卡")) {
+        exitScript(errCode, 'failed to click [打卡]');
+    }
+    if (tryCallUntil(5, () => textExists('选择打卡企业'))) {
+        windowLogAndSleep('multiple companies found');
+        if (isEmptyString(env.companyName)) {
+            exitScript(errCode, "not config the 'companyName'");
+        } else {
+            windowLogAndSleep('clicking the company:[' + env.companyName + ']');
+            textClick(env.companyName);
+        }
+    }
+    let limit = 20;
+    if (!tryCallUntil(limit, () => isOnClockInPage(true), () => windowLog('waiting for clock-in page:' + limit--))) {
+        if (limit === 0) {
+            exitScript(errCode, 'timeout to goto clock-in page!!!');
+        } else {
+            exitScript(errCode, 'still not on clock-in page.');
+        }
+    } else {
+        windowLogAndSleep('current in the clock-in page !');
     }
 }
 
-function loginToApp() {
-    if (isEmptyString(env.dingtalkAccount)) {
-        exitScript(-100, 'dingtalkAccount not configured.');
+function loginToApp(dingtalkAccount, dingtalkPwd) {
+    if (isEmptyString(dingtalkAccount ? dingtalkAccount : env.dingtalkAccount)) {
+        exitScript(errCode, 'dingtalkAccount not configured.');
         return;
     }
-    if (isEmptyString(env.dingtalkPwd)) {
-        exitScript(-100, 'dingtalkPwd not configured.');
+    if (isEmptyString(dingtalkPwd ? dingtalkPwd : env.dingtalkPwd)) {
+        exitScript(errCode, 'dingtalkPwd not configured.');
         return;
     }
-    var phonenumInput = id("et_phone_input").findOne(1000);
-    if (!tryCallUntil(9, () => phonenumInput != null, () => {
-        phonenumInput = id("et_phone_input").findOne(100);
-    })) {
-        exitScript(-100, 'account input not found.' + phonenumInput);
+    const epi = 'et_phone_input';
+    let etPhoneInput = id(epi).findOne(1000);
+    if (!tryCallUntil(9, () => (etPhoneInput = id(epi).findOne(100)) != null, i => windowLog('looking up the [' + epi + ']...' + i))) {
+        exitScript(errCode, 'account input not found:' + etPhoneInput);
         return;
     }
-    windowLogAndSleep1Second('found account input.');
-    const pwdInput = id("et_password").findOne(2000);
-    if (pwdInput == null) {
-        exitScript(-100, 'password input not found.');
+    windowLogAndSleep('found account input.');
+    const ep = 'et_password';
+    const etPassword = id(ep).findOne(2000);
+    if (etPassword == null) {
+        exitScript(errCode, 'password input not found.');
         return;
     }
-    windowLogAndSleep1Second('found password input.');
-    phonenumInput.setText(env.dingtalkAccount);
-    pwdInput.setText(env.dingtalkPwd);
-    windowLogAndSleep1Second('success to set dingtalk account and password.');
+    windowLogAndSleep('found password input.');
+    etPhoneInput.setText(env.dingtalkAccount);
+    etPassword.setText(env.dingtalkPwd);
+    windowLogAndSleep('success to set dingtalk account and password.');
 
     var cbPrivacy = id('cb_privacy').findOne(2000);
     if (cbPrivacy == null) {
-        exitScript(-100, 'privacy checkbox not found.');
+        exitScript(errCode, 'privacy checkbox not found.');
         return;
     }
-    windowLogAndSleep1Second('found privacy checkbox.');
+    windowLogAndSleep('found privacy checkbox.');
     if (!cbPrivacy.checked()) {
         cbPrivacy.click();
     }
-    windowLogAndSleep1Second('checked privacy checkbox:' + cbPrivacy.checked());
+    windowLogAndSleep('checked privacy checkbox:' + cbPrivacy.checked());
 
-    if (!tryCallUntil(1, () => !textOrDescExists('登录'), () => {
-        textClick('登录');
-        windowLogAndSleep1Second('clicking the button:[登录]');
-    })) {
-        exitScript(-100, 'failed to click the button:[登录]');
+    textClick('登录');
+    let page;
+    tryCallUntil(20, () => (page = currentPage()) === 'home' || page === 'login-with-wrong-pwd', i => windowLog('waiting for home page...' + i));
+    if (page === 'home') {
+        windowLog('success to login and current is on app-home page');
+        return;
     }
-    const page = waitForPageLoaded(20);
-    if (page !== 'home') {
-        let msg;
-        if (page === 'login-with-wrong-pwd') {
-            const errorMsg = textContains('密码错误').findOne().text();
-            msg = 'got msg after clicking login button:' + errorMsg;
-            textClick('确认');
-        } else {
-            msg = 'login timeout.';
-        }
-        exitScript(-100, msg);
+    let msg;
+    if (page === 'login-with-wrong-pwd') {
+        const errorMsg = textContains('密码错误').findOne(1000).text();
+        msg = 'got msg after clicking login button:' + errorMsg;
+    } else {
+        msg = 'timeout to login.';
     }
+    exitScript(errCode, msg);
 }
 
-function waitForPageLoaded(limit) {
+function waitForPageLoaded(limitSeconds, notShowCountDownWindowLog) {
+    let countDown = limitSeconds;
     let page = 'unknown';
-    while (limit-- > 0) {
-        windowLogAndSleep1Second('waiting for page loaded...' + limit);
+    while (limitSeconds-- > 0) {
+        if (!notShowCountDownWindowLog) {
+            windowLog('waiting for page loaded...' + (countDown--));
+        }
         if (textOrDescExists("登录") && textOrDescExists('密码')) {
             page = "login";
             break;
@@ -298,25 +354,54 @@ function waitForPageLoaded(limit) {
     return page;
 }
 
+function currentPage() {
+    let page;
+    if (textOrDescExists("登录") && textOrDescExists('密码')) {
+        page = "login";
+    } else if (textOrDescExists("消息")
+        && textOrDescExists("协作")
+        && textOrDescExists("工作台")
+        && textOrDescExists("通讯录")
+        && textOrDescExists("我的")) {
+        page = "home";
+    } else if (textExists('暂不更新') && textExists('更新')) {
+        textClick('暂不更新');
+        page = currentPage();
+    } else if (isOnClockInPage(true)) {
+        page = "clock-in";
+    } else if (isOnClockInPage(false)) {
+        page = "clock-in-other";
+    } else if (textOrDescExists('迟到打卡备注')) {
+        page = "clock-in-late";
+    } else if (textOrDescExists('早退打卡备注')) {
+        page = "clock-in-leave-early";
+    } else if (textContains('号码或密码错误').findOne(100) != null) {
+        page = 'login-with-wrong-pwd';
+    } else {
+        page = 'unknown';
+    }
+    return page;
+}
+
 function isOnClockInPage(exactly) {
     return (!exactly || textOrDescExists("申请")) && textOrDescExists("打卡") && textOrDescExists('统计') && textOrDescExists('设置');
 }
 
 function openApp(appName) {
-    windowLogAndSleep1Second('opening the app:' + appName);
+    windowLogAndSleep('opening the app:' + appName);
     launchApp(appName);
 }
 
 function unlockScreenIfNeeded() {
+    let i = 0;
     while (!device.isScreenOn()) {
-        windowLogAndSleep1Second('the device screen is not on, wakeup it.');
+        windowLogAndSleep('the device screen is not on, wakeup it.[' + (i++) + ']');
         device.wakeUpIfNeeded();
-        sleep1Second();
     }
-    windowLogAndSleep1Second('the screen on.')
+    windowLogAndSleep('the screen on.')
 
     if (!isOnLockScreen()) {
-        windowLogAndSleep1Second('the device already unlocked.')
+        windowLogAndSleep('the device already unlocked.')
         return;
     }
 
@@ -326,20 +411,20 @@ function unlockScreenIfNeeded() {
     }
 
     if (!screenLockedStatus()) {
-        windowLogAndSleep1Second("current screen does not need to be unlocked by password");
+        windowLogAndSleep("current screen does not need to be unlocked by password");
         swipeUp();
     } else {
     }
-    windowLogAndSleep1Second("success to unlock.");
+    windowLogAndSleep("success to unlock.");
 }
 
 function swipeUp() {
-    windowLogAndSleep1Second('start to swipe up to unlock')
+    windowLogAndSleep('start to swipe up to unlock')
     if (swipeUpOperation()) {
-        windowLogAndSleep1Second("success to swipe up to unlock");
+        windowLogAndSleep("success to swipe up to unlock");
     } else {
-        windowLogAndSleep1Second("cannot to swipe up to unlock");
-        exitScript(-100);
+        windowLogAndSleep("cannot to swipe up to unlock");
+        exitScript(errCode);
     }
 }
 
@@ -347,7 +432,7 @@ function swipeUpOperation() {
     let swipeTime = 0;
     if (dingConf.contains(swipeConfName)) {
         swipeTime = dingConf.get(swipeConfName);
-        windowLogAndSleep1Second('found previous swipe time:', swipeTime);
+        windowLogAndSleep('found previous swipe time:', swipeTime);
         for (let i = 0; i < 3; i++) {
             gesture(swipeTime, [w / 2, h * 0.8], [w / 2, h * 0.1]);
             sleep1Second();
@@ -362,11 +447,11 @@ function swipeUpOperation() {
     let appendTime = 20;
     for (let i = 0; i < 20; i++) {
         swipeTime += appendTime;
-        windowLogAndSleep1Second('current swipeTime is ', swipeTime);
+        windowLogAndSleep('current swipeTime is ', swipeTime);
         gesture(swipeTime, [w / 2, h * 0.8], [w / 2, h * 0.1]);
         sleep1Second();
         if (!isOnLockScreen()) {
-            windowLogAndSleep1Second('swipe up operation success, store the swipeTime:', swipeTime);
+            windowLogAndSleep('swipe up operation success, store the swipeTime:', swipeTime);
             dingConf.put(swipeConfName, swipeTime);
             return true;
         }
@@ -395,7 +480,7 @@ function isOnLockScreen() {
 function exitScript(code, msg) {
     sleep1Second();
     if (code > 0) {
-        windowLogAndSleep1Second('execute the scrip successfully, exit...');
+        windowLogAndSleep('execute the scrip successfully, exit...');
     }
     let imgUrl;
     let title;
@@ -412,7 +497,7 @@ function exitScript(code, msg) {
     } else if (code === -2) {
         title = 'failed';
         content = 'failed to check out [' + getFormatDateTime(0) + ']';
-    } else if (code === -100) {
+    } else if (code === errCode) {
         title = 'other-failed';
     } else {
         title = 'test';
@@ -420,7 +505,7 @@ function exitScript(code, msg) {
     }
     if (msg) {
         content += msg;
-        windowLogAndSleep1Second(msg);
+        windowLogAndSleep(msg);
     }
     imgUrl = screenshotsAndUpload(title);
     let scriptCostSec = (new Date().getTime() - scriptStartTime) / 1000.0;
@@ -429,25 +514,24 @@ function exitScript(code, msg) {
         postExit();
     }
     if (code < 0) {
-        windowLogAndSleep1Second('open hamibot console for log content');
         app.startActivity('console');
     }
     hamibot.exit();
 }
 
 function postExit() {
-    if (env.exitAppPost) {
-        windowLogAndSleep1Second('kill the app post exit.');
+    if (testingExitAppPostEnabled && env.exitAppPost) {
+        windowLogAndSleep('kill the app post exit.');
         killApp(dingTalkAppName);
     }
-    if (env.lockScreenPost) {
-        windowLogAndSleep1Second('lock the screen post exit.');
+    if (testingLockScreenPostEnabled && env.lockScreenPost) {
+        windowLogAndSleep('lock the screen post exit.');
         lockScreenInHome();
     }
 }
 
 function uploadImageAndGetLink(filePath) {
-    windowLogAndSleep1Second('ready to upload the file:' + filePath);
+    windowLogAndSleep('ready to upload the file:' + filePath);
     let res = null;
     try {
         res = http.postMultipart('https://imgs.top/api/v1/upload', {
@@ -458,60 +542,63 @@ function uploadImageAndGetLink(filePath) {
             }
         });
     } catch (err) {
-        windowLogAndSleep1Second('upload img error:' + err);
+        windowLogAndSleep('upload img error:' + err);
     }
     if (res == null || res.body == null) {
-        windowLogAndSleep1Second('failed to upload img with empty response');
+        windowLogAndSleep('failed to upload img with empty response');
         return null;
     }
 
     const responseJson = res.body.json();
     if (responseJson.status) {
         const url = responseJson.data.imgurl
-        windowLogAndSleep1Second('upload success, the img url:' + url);
+        windowLogAndSleep('upload success, the img url:' + url);
         return url;
     } else {
-        windowLogAndSleep1Second('upload failed msg:' + responseJson.message);
+        windowLogAndSleep('upload failed msg:' + responseJson.message);
         return null;
     }
 }
 
 function getLockTime() {
     let lockTime = Settings.System.getInt(context.getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT);
-    log('lockTime:', lockTime);
+    log('auto-lock time:', lockTime);
     if (null == lockTime || "" === lockTime || "undefined" === lockTime) {
         return 4000;
     }
     return lockTime / 2;
 }
 
-function textClick(s) {
-    let uiObj = text(s).findOne();
+function textClick(s, findTimeoutMs) {
+    let uiObj = text(s).findOne(findTimeoutMs ? findTimeoutMs : 1000);
     if (uiObj != null) {
         if (uiObj.click()) {
-            windowLogAndSleep1Second('component clicked text[' + s + ']');
+            windowLogAndSleep('component clicked text[' + s + ']');
             return true;
         } else {
             let bounds = uiObj.bounds();
             let centerX = bounds.centerX();
             let centerY = bounds.centerY();
             let clicked = click(centerX, centerY);
-            windowLogAndSleep1Second('[' + centerX + ',' + centerY + ']clicked text[' + s + ']:' + clicked);
+            windowLogAndSleep('[' + centerX + ',' + centerY + ']clicked text[' + s + ']:' + clicked);
             return clicked;
         }
     }
     return false;
 }
 
-function idClick(componentId) {
-    let uiObj = id(componentId).findOne();
+function idClick(objId, timeout) {
+    let uiObj = id(objId).findOne(timeout ? timeout : 100);
     if (uiObj != null) {
+        windowLogAndSleep('found component by id:' + objId);
         if (uiObj.click()) {
+            windowLogAndSleep('success to click component by id:' + objId);
             return true;
         } else {
             let bounds = uiObj.bounds();
             let centerX = bounds.centerX();
             let centerY = bounds.centerY();
+            windowLogAndSleep('ready to click component[' + objId + '] by position [' + centerX + ', ' + centerY + ']');
             return click(centerX, centerY);
         }
     }
@@ -526,30 +613,16 @@ function textExists(s) {
     return text(s).exists();
 }
 
-function callUntil1(predicateFunc) {
-    return callUntil2(predicateFunc, emptyFunction);
-}
-
-function callUntil2(predicateFunc, func) {
-    for (let i = 0; i > -1; i++) {
-        let r = predicateFunc();
-        if (!r) {
-            func();
-            sleep1Second();
-        } else {
-            return true;
-        }
-    }
-    return false;
-}
-
-function tryCallUntil(times, exitPredicate, func) {
+function tryCallUntil(times, exitPredicate, func, sleepMs) {
+    const st = sleepMs ? sleepMs : 1000;
     for (let i = 0; i < times; i++) {
-        if (exitPredicate()) {
+        if (exitPredicate != null && exitPredicate(times - i)) {
             return true;
         } else {
-            func();
-            sleep1Second();
+            if (func != null) {
+                func(times - i);
+            }
+            sleep(st);
         }
     }
     return false;
@@ -558,43 +631,44 @@ function tryCallUntil(times, exitPredicate, func) {
 function killApp(appName) {
     let isKillAppSuccess = false;
     let packageName = app.getPackageName(appName);
-    if (app.openAppSetting(packageName)) {
-        windowLogAndSleep1Second('enter app-setting page')
-        tryCallUntil(5, () => {
-            if (text("结束运行").exists()) {
+    if (tryCallUntil(5, () => app.openAppSetting(packageName))) {
+        windowLogAndSleep('enter kill app page');
+        if (tryCallUntil(10, () => textExists("结束运行") || textExists("强行停止"))) {
+            if (textExists("结束运行")) {
+                windowLogAndSleep('exists text[结束运行]');
                 textClick("结束运行");
-                windowLogAndSleep1Second('textClick [结束运行]');
-                sleep1Second();
-                if (text("确定").exists()) {
+                windowLogAndSleep('clicked text[结束运行]');
+                if (tryCallUntil(5, () => textExists("确定"))) {
                     textClick("确定");
-                    windowLogAndSleep1Second('textClick [结束运行-确定]');
+                    windowLogAndSleep('clicked text [结束运行-确定]');
                 }
-                sleep1Second();
-                isKillAppSuccess = text("结束运行").exists();
-            } else if (text("强行停止").exists()) {
+                isKillAppSuccess = tryCallUntil(5, () => textExists("结束运行"));
+            } else if (textExists("强行停止")) {
+                windowLogAndSleep('exists text[强行停止]');
                 textClick("强行停止");
-                windowLogAndSleep1Second('textClick [强行停止]');
+                windowLogAndSleep('clicked text [强行停止]');
                 sleep1Second();
-                if (text("确定").exists()) {
+                if (tryCallUntil(5, () => textExists("确定"))) {
                     textClick("确定");
-                    windowLogAndSleep1Second('textClick [强行停止-确定]');
+                    windowLogAndSleep('clicked text [强行停止-确定]');
                 }
-                sleep1Second();
-                isKillAppSuccess = text("强行停止").exists();
+                isKillAppSuccess = tryCallUntil(5, () => textExists("强行停止"));
             } else {
-                windowLogAndSleep1Second('not support to kill app');
-                exitScript(-100);
                 isKillAppSuccess = false;
             }
-            return isKillAppSuccess;
-        }, emptyFunction);
+        } else {
+            exitScript(errCode, 'not support to kill the app, [结束运行] or [强行停止] not found');
+            return false;
+        }
+    } else {
+        exitScript(errCode, 'not support to kill the app, cannot goto kill app page');
+        return false;
     }
     if (isKillAppSuccess) {
-        windowLogAndSleep1Second('success to kill the app');
+        windowLogAndSleep('success to kill the app');
     } else {
-        windowLogAndSleep1Second('failed to kill the app');
+        exitScript(errCode, 'failed to kill the app');
     }
-    sleep(2000);
     return isKillAppSuccess;
 }
 
@@ -608,10 +682,10 @@ function sleep1Second() {
     sleep(1000);
 }
 
-function windowLogAndSleep1Second(s) {
+function windowLogAndSleep(s, sleepMs) {
     setFloatText(s);
     log(s);
-    sleep1Second();
+    sleep(sleepMs ? sleepMs : 1000);
 }
 
 function windowLog(s) {
@@ -669,10 +743,10 @@ function getFormatDateTime(format) {
 
 function notifyMsg(title, content, imgUrl) {
     if (!testingNotifyMsgEnabled || !env.notifyMsg || isEmptyString(env.pushplusToken)) {
-        windowLogAndSleep1Second('notify disabled or token is empty.');
+        windowLogAndSleep('notify disabled or token is empty.');
         return;
     }
-    windowLogAndSleep1Second('notify title:' + title + ', content:' + content);
+    windowLogAndSleep('notify title:' + title + ', content:' + content);
     const token = env.pushplusToken;
     let finalContent;
     if (imgUrl) {

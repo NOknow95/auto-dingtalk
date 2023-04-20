@@ -15,6 +15,11 @@
     "placeholder": "如果你的钉钉加入了多个公司，请填写你打卡的公司名"
   },
   {
+    "label": "用户昵称[非必填]",
+    "name": "userInfoName",
+    "placeholder": "用来检查登录的账号是不是正确的"
+  },
+  {
     "name": "notifyMsg",
     "type": "checkbox",
     "label": "消息通知",
